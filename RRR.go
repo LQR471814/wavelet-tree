@@ -1,6 +1,8 @@
-package wavelettrie
+package wavelettree
 
-import "fmt"
+import (
+	"fmt"
+)
 
 /*
 divide bitvector into fixed-size blocks
@@ -46,11 +48,23 @@ block configurations can vary based on block size:
 so `C(4, 3)` for b=4 and class=3 would yield `log_2(4)` which is `2`
 
 the most amount of memory an offset field could take is 7.
-That is the result of `ceil(log_2(C(8, 4)))`.
+that is the result of `ceil(log_2(C(8, 4)))`.
 */
 
 // bitvector is effectively a slice of bits
-type bitvector []uint8
+type bitvector struct {
+	bitlength uint64
+	bytes     []uint8
+}
+
+func makeBitVector(bitlength uint64) bitvector {
+	bytelength := bitlength/8 + 1
+	vec := bitvector{
+		bitlength: bitlength,
+		bytes:     make([]uint8, bytelength),
+	}
+	return vec
+}
 
 // Get gets the value of any size 1-8 bit word at any bit index i from the
 // bitvector
@@ -64,20 +78,23 @@ func (v bitvector) Get(size uint8, i uint64) (result uint8) {
 
 	var mask uint8 = 255 >> (8 - size)
 
-	result = (v[byte] >> bit) & mask
+	result = (v.bytes[byte] >> bit) & mask
 
 	// 9 = 8+1 (since overlap threshold for size=1 should be 8)
 	var overlapThreshold uint8 = 9 - size
 
+	// amount of bits set in the current byte
+	var currentSet = 8 - bit
+
 	// overlap amount is: amount of bits to be found in the next byte after
 	// bits are found in current byte
-	var overlapAmount uint8 = size - (8 - bit)
+	var overlapAmount uint8 = size - currentSet
 
 	if bit >= overlapThreshold {
-		next := v[byte+1]
+		next := v.bytes[byte+1]
 		var nextmask uint8 = 255 >> overlapAmount
-		var overlap uint8 = (next >> (overlapAmount - 1)) & nextmask
-		result = result | overlap
+		var overlap uint8 = next & nextmask
+		result = result | (overlap << currentSet)
 	}
 
 	return
@@ -97,30 +114,117 @@ func (v bitvector) Set(size uint8, i uint64, value uint8) {
 
 	value = value & mask
 
-	surrounding := v[byte] & (^mask)
-	v[byte] = surrounding | (value << bit)
+	surrounding := v.bytes[byte] & (^mask)
+	v.bytes[byte] = surrounding | (value << bit)
 
 	// 9 = 8+1 (since overlap threshold for size=1 should be 8)
 	var overlapThreshold uint8 = 9 - size
 
+	// amount of bits set in the current byte
+	var currentSet uint8 = 8 - bit
+
 	// overlap amount is: amount of bits to be found in the next byte after
 	// bits are found in current byte
-	var bitsInCurrent uint8 = 8 - bit
-	var overlapAmount uint8 = size - bitsInCurrent
+	var overlapAmount uint8 = size - currentSet
 
 	if bit >= overlapThreshold {
-		next := v[byte+1]
+		next := v.bytes[byte+1]
 		var nextMask uint8 = 255 >> overlapAmount
 		nextupSurround := next & (^nextMask)
+
 		// remove the bits in value that have already been set in the current
 		// byte and set those bits in the next byte
-		v[byte+1] = nextupSurround | (value >> bitsInCurrent)
+		v.bytes[byte+1] = nextupSurround | (value >> currentSet)
 	}
 }
 
-// 3 bits for class (represents 8 different possible 1s)
-type block struct {
+// Length returns the bit length of the bitvector.
+func (v bitvector) Length() uint64 {
+	return v.bitlength
 }
 
+// Append adds a number of bits 1-8 to the bitvector.
+func (v bitvector) Append(size, value uint8) bitvector {
+	originalEnd := v.bitlength
+	v.bitlength += uint64(size)
+	byteLength := v.bitlength/8 + 1
+	if int(byteLength) > len(v.bytes) {
+		v.bytes = append(v.bytes, 0)
+	}
+	v.Set(size, originalEnd, value)
+	return v
+}
+
+// block is encoded as follows
+// - class
+// - offset
+
 type RRR struct {
+	encoded bitvector
+	// blockSize is the number of bits in a block (value from 1-64)
+	blockSize uint8
+	// classSize (number of bits required to store the number of 1s for each
+	// block, max: # of bits in the block)
+	classSize uint8
+	// offsetSize (number of bits required to store the offset for each block,
+	// max: C(n, n/2) + 1)
+	offsetSize uint8
+}
+
+type Integers interface {
+	~int | ~uint |
+		~int8 | ~uint8 |
+		~int16 | ~uint16 |
+		~int32 | ~uint32 |
+		~int64 | ~uint64
+}
+
+// floor(log_2(n))
+func floorLog2[T Integers](n T) (out uint8) {
+	var zero T
+	for n > zero {
+		n >>= 1
+		out++
+	}
+	return
+}
+
+func calcBlocksize(n uint64) (blocksize uint8) {
+	blocksize = floorLog2(n)
+	// blocksize / 2
+	blocksize >>= 1
+	return
+}
+
+func choose(n, k uint64) (result uint64) {
+	if k > n {
+		return 0
+	}
+	if k == 0 || k == n {
+		return 1
+	}
+	if k > n-k {
+		k = n - k
+	}
+	result = 1
+	for i := uint64(1); i <= k; i++ {
+		result = result * (n - i + 1) / i
+	}
+	return result
+}
+
+func NewRRR(bits bitvector) (out RRR) {
+	n := bits.Length()
+
+	out.blockSize = calcBlocksize(n)
+	out.classSize = floorLog2(out.blockSize) + 1
+
+	maxOffset := choose(uint64(out.blockSize), uint64(out.blockSize)>>1)
+	out.offsetSize = floorLog2(maxOffset) + 1
+
+	blocks := n/uint64(out.blockSize) + 1
+	totalSize := blocks * (uint64(out.classSize) + uint64(out.offsetSize))
+	out.encoded = makeBitVector(totalSize)
+
+	return
 }
