@@ -1,5 +1,9 @@
 package wavelettree
 
+import (
+	"slices"
+)
+
 /*
 RRR description:
 
@@ -58,7 +62,7 @@ block is encoded as follows:
 // RRR enables near O(1) calculations of bit rank(i) and other operations.
 type RRR struct {
 	encoded BitVector
-	// blockSize is the number of bits in a block (value from 1-64)
+	// blockSize is the number of bits in a block (value from [1, 64])
 	blockSize uint8
 	// classFieldSize (number of bits required to store the number of 1s for each
 	// block, max: # of bits in the block)
@@ -74,47 +78,46 @@ var offset_lookup_uint16 [][]uint16
 var offset_lookup_uint32 [][]uint32
 var offset_lookup_uint64 [][]uint64
 
-func computeOffsetLookup[T uint8 | uint16 | uint32 | uint64](out [][]T, bytesize, class uint8, current T) {
-	class++
-	for i := range bytesize {
-		out[class] = append(out[class], )
+func computeOffset() {
+}
+
+func computeOffsetLookup[T uint8 | uint16 | uint32 | uint64](out *[][]T, bytesize uint8) {
+	slice := make([][]T, bytesize+1)
+	for value := T(0); value <= ^T(0); value++ {
+		c := countbits(bytesize, value)
+		slice[c] = append(slice[c], value)
 	}
+	*out = slice
 }
 
 func init() {
-	offset_lookup_uint8 = make([][]uint8, 8)
-
-	cur := uint8(1)
-	for i1 := range 8 {
-		offset_lookup_uint8[0] = append(offset_lookup_uint8[0], cur)
-		cur <<= 1
-
-		cur2 := uint8(1) << (i1 + 1)
-		for i2 := range 8 - i1 {
-			offset_lookup_uint8[1] = append(offset_lookup_uint8[1], cur2|cur)
-			cur2 <<= 1
-		}
-	}
-
+	computeOffsetLookup(&offset_lookup_uint8, 8)
+	computeOffsetLookup(&offset_lookup_uint16, 16)
+	computeOffsetLookup(&offset_lookup_uint32, 32)
+	computeOffsetLookup(&offset_lookup_uint64, 64)
 }
 
 func getBlockValues(blockSize uint8, i uint64, bits BitVector) (class, offset uint8) {
 	switch {
 	case blockSize <= 8:
 		content := bits.Get8(blockSize, i)
-		class = countbits[uint8](8, content)
+		class = countbits(8, content)
+		offset = uint8(slices.Index(offset_lookup_uint8[class], content))
 		return
 	case blockSize <= 16:
 		content := bits.Get16(blockSize, i)
-		class = countbits[uint16](16, content)
+		class = countbits(16, content)
+		offset = uint8(slices.Index(offset_lookup_uint16[class], content))
 		return
 	case blockSize <= 32:
 		content := bits.Get32(blockSize, i)
-		class = countbits[uint32](32, content)
+		class = countbits(32, content)
+		offset = uint8(slices.Index(offset_lookup_uint32[class], content))
 		return
 	case blockSize <= 64:
 		content := bits.Get64(blockSize, i)
-		class = countbits[uint64](64, content)
+		class = countbits(64, content)
+		offset = uint8(slices.Index(offset_lookup_uint64[class], content))
 		return
 	}
 	panic("exceeded max block length 64!")
