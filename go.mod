@@ -1,4 +1,4 @@
-module wavelet-trie
+module wavelet-tree
 
 go 1.24.3
 
