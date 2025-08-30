@@ -1,65 +1,7 @@
 package wavelettree
 
-import (
-	"slices"
-)
-
-/*
-RRR description:
-
-divide bitvector into fixed-size blocks
-usually b (size) = log(n) / 2 bits (this is the optimal value)
-
-for each block store:
-  - the # of 1's (class)
-  - the position of 1's (offset)
-      - the offset is the index of the current block in the list of possible
-      combinations of patterns with the given block size and class
-      - ex. 1 0 1 1
-      - 4 bits has C(4,3)
-
-superblocks which are blocks of blocks can be used to accelerate rank
-queries.
-  - each superblock contains the total number of 1s of the blocks inside it
-  - so if you were to compute `rank(i)`, instead of having to go through
-  each of the blocks up to `i`, you would only need to sum up all the
-  "superblocks" until `i`, then go through the block which contains `i`
-
-for efficient operations, we'll want to consider the CPU's word size. (for
-64 bit cpus, this would be 64 bits) This means that the practical upper limit
-for block size b is defined as:
-
-b = min(log(n)/2, 64)
-
-this also indicates that our max size bitvector n is given by:
-log(n)/2 = 64
-n = 10^128
-
-which should frankly be plenty, so we don't need to worry about reaching the
-maximum block size.
-*/
-
-/*
-Blocks:
-
-block configurations can vary based on block size:
-- b <= 8
-	- 3 bits for class
-- b <= 4
-	- 2 bits for class
-
-`log_2(C(b, class))` bits for offset.
-so `C(4, 3)` for b=4 and class=3 would yield `log_2(4)` which is `2`
-
-the most amount of memory an offset field could take is 7 bits
-that is the result of `ceil(log_2(C(8, 4)))`.
-
-block is encoded as follows:
-- class (some bits)
-- offset (some bits)
-*/
-
-// RRR enables near O(1) calculations of bit rank(i) and other operations.
+// RRR enables near practically O(1) calculations of bitwise rank(b, i) and
+// select(b, i)
 type RRR struct {
 	encoded BitVector
 	// blockSize is the number of bits in a block (value from [1, 64])
@@ -70,79 +12,105 @@ type RRR struct {
 	// offsetFieldSize (number of bits required to store the offset for each block,
 	// max: C(n, n/2) + 1)
 	offsetFieldSize uint8
+	// superblockSize stores the number of blocks to include in a super block.
+	superblockSize uint8
 }
 
-// maps class -> possible offset combinations
-var offset_lookup_uint8 [][]uint8
-var offset_lookup_uint16 [][]uint16
-var offset_lookup_uint32 [][]uint32
-var offset_lookup_uint64 [][]uint64
-
-func computeOffset() {
-}
-
-func computeOffsetLookup[T uint8 | uint16 | uint32 | uint64](out *[][]T, bytesize uint8) {
-	slice := make([][]T, bytesize+1)
-	for value := T(0); value <= ^T(0); value++ {
-		c := countbits(bytesize, value)
-		slice[c] = append(slice[c], value)
+func computeOffset[T uint8 | uint16 | uint32 | uint64](blocksize, bytesize, class uint8, content T) (offset uint8) {
+	remaining := class
+	mask := T(1)
+	for range bytesize {
+		if content&mask > 0 {
+			offset += uint8(choose(uint64(blocksize-1), uint64(remaining)))
+		}
+		mask <<= 1
 	}
-	*out = slice
+	return
 }
 
-func init() {
-	computeOffsetLookup(&offset_lookup_uint8, 8)
-	computeOffsetLookup(&offset_lookup_uint16, 16)
-	computeOffsetLookup(&offset_lookup_uint32, 32)
-	computeOffsetLookup(&offset_lookup_uint64, 64)
-}
-
-func getBlockValues(blockSize uint8, i uint64, bits BitVector) (class, offset uint8) {
+func getBlockValues(blocksize uint8, i uint64, bits BitVector) (class, offset uint8) {
 	switch {
-	case blockSize <= 8:
-		content := bits.Get8(blockSize, i)
+	case blocksize <= 8:
+		content := bits.Get8(blocksize, i)
 		class = countbits(8, content)
-		offset = uint8(slices.Index(offset_lookup_uint8[class], content))
+		offset = computeOffset(blocksize, 8, class, content)
 		return
-	case blockSize <= 16:
-		content := bits.Get16(blockSize, i)
+	case blocksize <= 16:
+		content := bits.Get16(blocksize, i)
 		class = countbits(16, content)
-		offset = uint8(slices.Index(offset_lookup_uint16[class], content))
+		offset = computeOffset(blocksize, 16, class, content)
 		return
-	case blockSize <= 32:
-		content := bits.Get32(blockSize, i)
+	case blocksize <= 32:
+		content := bits.Get32(blocksize, i)
 		class = countbits(32, content)
-		offset = uint8(slices.Index(offset_lookup_uint32[class], content))
+		offset = computeOffset(blocksize, 32, class, content)
 		return
-	case blockSize <= 64:
-		content := bits.Get64(blockSize, i)
+	case blocksize <= 64:
+		content := bits.Get64(blocksize, i)
 		class = countbits(64, content)
-		offset = uint8(slices.Index(offset_lookup_uint64[class], content))
+		offset = computeOffset(blocksize, 64, class, content)
 		return
 	}
 	panic("exceeded max block length 64!")
 }
 
-func NewRRR(bits BitVector) (out RRR) {
+// RRROptions allow you to configure some parameters of the RRR datastructure,
+// usually you will not need to touch this
+type RRROptions struct {
+	// BlockSize defines the number of bits within a block
+	//
+	// It is a value from [1, 64], if 0 or unspecified it will automatically
+	// calculate the theoretical optimal value and use it
+	BlockSize uint8
+
+	// SuperBlockSize defines the number of blocks within a super block
+	//
+	// It is a value from [2, 255], if < 2, it will automatically calculate the
+	// theoretical optimal value and use it
+	SuperBlockSize uint8
+}
+
+// NewRRR creates a new RRR datastructure
+func NewRRR(bits BitVector, opts RRROptions) (out RRR) {
 	n := bits.Length()
+	nbitsize := floorLog2(n)
 
-	blocksize := floorLog2(n)
-	blocksize >>= 1
+	blocksize := opts.BlockSize
+	if opts.BlockSize > 64 {
+		panic("blocksize must not be larger than 64!")
+	}
+	if opts.BlockSize == 0 {
+		blocksize = nbitsize
+		blocksize >>= 1
+	}
+
+	superblocksize := opts.SuperBlockSize
+	if opts.SuperBlockSize < 2 {
+		superblocksize = nbitsize / blocksize
+	}
+
+	// the block size in bits to use on the input
 	out.blockSize = blocksize
-	out.classFieldSize = floorLog2(out.blockSize)
 
-	maxOffset := choose(uint64(out.blockSize), uint64(out.blockSize)>>1)
+	// the size of the class field in the serialized block
+	out.classFieldSize = floorLog2(blocksize)
+	// the maximum possible value for offset (given by nCr(b, b/2))
+	maxOffset := choose(uint64(blocksize), uint64(out.blockSize)>>1)
+	// the size of the offset field in the serialized block
 	out.offsetFieldSize = floorLog2(maxOffset)
 
-	blocks := n/uint64(out.blockSize) + 1
-	blockSize := out.classFieldSize + out.offsetFieldSize
-	totalSize := blocks * uint64(blockSize)
-	out.encoded = NewBitVector(totalSize)
+	blockNum := n / uint64(blocksize)
 
-	for i := range blocks {
-		bitIdx := i * uint64(blockSize)
+	// the serialized block size (in bits) of class + offset
+	serializedBlocksize := out.classFieldSize + out.offsetFieldSize
+	// the total size (in bits) of the serialized block
+	totalSerializedSize := blockNum * uint64(serializedBlocksize)
+	out.encoded = NewBitVector(totalSerializedSize)
 
-		class, offset := getBlockValues(out.blockSize, bitIdx, bits)
+	// serialize blocks
+	for i := range blockNum {
+		bitIdx := i * uint64(blocksize)
+		class, offset := getBlockValues(blocksize, bitIdx, bits)
 		out.encoded.Set8(out.classFieldSize, bitIdx, class)
 		out.encoded.Set8(out.offsetFieldSize, bitIdx+uint64(out.classFieldSize), offset)
 	}
@@ -150,6 +118,8 @@ func NewRRR(bits BitVector) (out RRR) {
 	return
 }
 
-// func (r RRR) Rank() {
-//
-// }
+// Rank returns the number of "bit" encountered from [0, i] in the bitvector
+// where "bit" is either 0 or 1
+func (r RRR) Rank(bit uint8, i uint64) uint64 {
+	return 0
+}

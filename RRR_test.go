@@ -33,7 +33,7 @@ func TestBitvector(t *testing.T) {
 }
 
 func TestNewRRR(t *testing.T) {
-	out := NewRRR(NewBitVector(1000))
+	out := NewRRR(NewBitVector(1000), RRROptions{})
 	t.Log(
 		"b:",
 		out.blockSize,

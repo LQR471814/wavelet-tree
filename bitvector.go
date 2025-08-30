@@ -83,7 +83,7 @@ func (v BitVector) Set32(size uint8, i uint64, value uint32) {
 	setbits(32, size, v, i, value)
 }
 
-// Set64 allows you to get 1-64 bits from the bitvector at once and return it
+// Set64 allows you to get 1-64 bitsv.bytes from the bitvector at once and return it
 // as a uint64
 func (v BitVector) Set64(size uint8, i uint64, value uint64) {
 	if size == 0 || size > 64 {
@@ -131,6 +131,10 @@ func (v BitVector) Append64(size uint8, value uint64) BitVector {
 // - bitsize can be any number of bits from 1-64
 // - bytesize must be one of 8, 16, 32, or 64
 func getbits[T uint8 | uint16 | uint32 | uint64](bytesize, bitsize uint8, v BitVector, i uint64) (result T) {
+	if i >= v.bitlength {
+		panic(fmt.Sprintf("get bit index out of range: [%d]", i))
+	}
+
 	byteslice := *(*[]T)(unsafe.Pointer(&v.bytes))
 
 	byte := i / uint64(bytesize)
@@ -166,6 +170,10 @@ func getbits[T uint8 | uint16 | uint32 | uint64](bytesize, bitsize uint8, v BitV
 }
 
 func setbits[T uint8 | uint16 | uint32 | uint64](bytesize, bitsize uint8, v BitVector, i uint64, value T) {
+	if i >= v.bitlength {
+		panic(fmt.Sprintf("set bit index out of range: [%d]", i))
+	}
+
 	byteslice := *(*[]T)(unsafe.Pointer(&v.bytes))
 
 	byte := i / uint64(bytesize)
@@ -206,16 +214,16 @@ func setbits[T uint8 | uint16 | uint32 | uint64](bytesize, bitsize uint8, v BitV
 
 func appendbits[T uint8 | uint16 | uint32 | uint64](bytesize, bitsize uint8, v BitVector, value T) BitVector {
 	byteslice := *(*[]T)(unsafe.Pointer(&v.bytes))
+	v.bytes = *(*[]byte)(unsafe.Pointer(&byteslice))
 
 	originalEnd := v.bitlength
 	v.bitlength += uint64(bitsize)
 	byteLen := v.bitlength/uint64(bytesize) + 1
 
-	if int(byteLen) > len(v.bytes) {
+	if int(byteLen) > len(byteslice) {
 		byteslice = append(byteslice, 0)
 	}
 	setbits(bytesize, bitsize, v, originalEnd, value)
-	v.bytes = *(*[]byte)(unsafe.Pointer(&byteslice))
 
 	return v
 }
@@ -223,4 +231,20 @@ func appendbits[T uint8 | uint16 | uint32 | uint64](bytesize, bitsize uint8, v B
 // Length returns the bit length of the bitvector.
 func (v BitVector) Length() uint64 {
 	return v.bitlength
+}
+
+func (v BitVector) String() string {
+	out := make([]byte, 0, v.bitlength)
+	for _, b := range v.bytes {
+		mask := uint8(1)
+		for range 8 {
+			if mask&b > 0 {
+				out = append(out, '1')
+			} else {
+				out = append(out, '0')
+			}
+			mask <<= 1
+		}
+	}
+	return string(out[:v.bitlength])
 }

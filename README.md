@@ -17,3 +17,7 @@ So if you need to store multiple strings in memory and have random
 access while still enjoying the memory efficiency improvements of
 compression, you may want to consider a wavelet tree.
 
+## Explainers
+
+Explainers for the algorithms can be found under [docs](./docs).
+
