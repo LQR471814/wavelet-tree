@@ -5,7 +5,7 @@
 ## Features
 
 - Efficient storage with bit-packing.
-- Fast calculation of `rank(i)` with `RRR`.
+- Fast calculation of $\text{rank}(b, i)$ with RRR.
 
 ## Why?
 
