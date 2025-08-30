@@ -22,7 +22,8 @@ Each block stores:
 As such, the block effectively functions as a cache for
 calculations critical for `rank` and `select`.
 
-The theoretical optimal value for the block size $b$ is given by:
+Usually, the theoretical optimal value for the block size $b$ is
+calculated with the following formula:
 
 $$
 b = \frac{\log_{2}(n)}{2}
@@ -66,9 +67,10 @@ cumulative rank.
 The fact that this lookup is only stored per $k$ blocks also
 reduces the memory overhead of storing this lookup.
 
-Like $b$, $k$ also has an optimal value.
+Like $b$, $k$ also has an optimal value that is usually given by
+the formula:
 
 $$
-k = \frac{\log_{2}(n)}{b}
+k = \log_{2}(n)
 $$
 

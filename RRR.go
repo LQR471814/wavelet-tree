@@ -6,29 +6,34 @@ type RRR struct {
 	encoded BitVector
 	// blockSize is the number of bits in a block (value from [1, 64])
 	blockSize uint8
-	// classFieldSize (number of bits required to store the number of 1s for each
-	// block, max: # of bits in the block)
+	// classFieldSize is the number of bits required to store the number of 1s
+	// for each block, max: # of bits in the block
 	classFieldSize uint8
-	// offsetFieldSize (number of bits required to store the offset for each block,
-	// max: C(n, n/2) + 1)
+	// offsetFieldSize is the number of bits required to store the offset for
+	// each block, max: C(n, n/2) + 1
 	offsetFieldSize uint8
-	// superblockSize stores the number of blocks to include in a super block.
+	// superblockSize stores the number of blocks to include in a super block
 	superblockSize uint8
+	// cumulativeRankFieldSize is the number of bits required to store the
+	// cumulative rank of a superblock.
+	cumulativeRankFieldSize uint8
+	// totalSuperblockSize is the number of bits a single super block takes up
+	totalSuperblockSize uint8
 }
 
-func computeOffset[T uint8 | uint16 | uint32 | uint64](blocksize, bytesize, class uint8, content T) (offset uint8) {
+func computeOffset[T uint8 | uint16 | uint32 | uint64](blocksize, bytesize, class uint8, content T) (offset uint64) {
 	remaining := class
 	mask := T(1)
 	for range bytesize {
 		if content&mask > 0 {
-			offset += uint8(choose(uint64(blocksize-1), uint64(remaining)))
+			offset += choose(uint64(blocksize-1), uint64(remaining))
 		}
 		mask <<= 1
 	}
 	return
 }
 
-func getBlockValues(blocksize uint8, i uint64, bits BitVector) (class, offset uint8) {
+func getBlockValues(blocksize uint8, i uint64, bits BitVector) (class uint8, offset uint64) {
 	switch {
 	case blocksize <= 8:
 		content := bits.Get8(blocksize, i)
@@ -83,14 +88,13 @@ func NewRRR(bits BitVector, opts RRROptions) (out RRR) {
 		blocksize = nbitsize
 		blocksize >>= 1
 	}
+	out.blockSize = blocksize
 
 	superblocksize := opts.SuperBlockSize
 	if opts.SuperBlockSize < 2 {
-		superblocksize = nbitsize / blocksize
+		superblocksize = nbitsize
 	}
-
-	// the block size in bits to use on the input
-	out.blockSize = blocksize
+	out.superblockSize = superblocksize
 
 	// the size of the class field in the serialized block
 	out.classFieldSize = floorLog2(blocksize)
@@ -99,20 +103,61 @@ func NewRRR(bits BitVector, opts RRROptions) (out RRR) {
 	// the size of the offset field in the serialized block
 	out.offsetFieldSize = floorLog2(maxOffset)
 
+	// worst case all ones up to the last superblock
+	out.cumulativeRankFieldSize = floorLog2(n)
+
 	blockNum := n / uint64(blocksize)
+	// there is additional +1 because even if n cannot "fit" a single super
+	// block, it will still be added at the start anyway
+	superBlockNum := n/(uint64(blocksize)*uint64(superblocksize)) + 1
 
 	// the serialized block size (in bits) of class + offset
-	serializedBlocksize := out.classFieldSize + out.offsetFieldSize
+	totalBlockSize := out.classFieldSize + out.offsetFieldSize
 	// the total size (in bits) of the serialized block
-	totalSerializedSize := blockNum * uint64(serializedBlocksize)
+	totalSerializedSize := blockNum*uint64(totalBlockSize) + superBlockNum*uint64(out.cumulativeRankFieldSize)
 	out.encoded = NewBitVector(totalSerializedSize)
 
+	out.totalSuperblockSize = out.cumulativeRankFieldSize + totalBlockSize
+
 	// serialize blocks
+	inCursor := uint64(0)
+	outCursor := uint64(0)
+	cumulativeRank := uint64(0)
 	for i := range blockNum {
-		bitIdx := i * uint64(blocksize)
-		class, offset := getBlockValues(blocksize, bitIdx, bits)
-		out.encoded.Set8(out.classFieldSize, bitIdx, class)
-		out.encoded.Set8(out.offsetFieldSize, bitIdx+uint64(out.classFieldSize), offset)
+		if i%uint64(superblocksize) == 0 {
+			switch {
+			case out.cumulativeRankFieldSize <= 8:
+				out.encoded.Set8(out.cumulativeRankFieldSize, outCursor, uint8(cumulativeRank))
+			case out.cumulativeRankFieldSize <= 16:
+				out.encoded.Set16(out.cumulativeRankFieldSize, outCursor, uint16(cumulativeRank))
+			case out.cumulativeRankFieldSize <= 32:
+				out.encoded.Set32(out.cumulativeRankFieldSize, outCursor, uint32(cumulativeRank))
+			case out.cumulativeRankFieldSize <= 64:
+				out.encoded.Set64(out.cumulativeRankFieldSize, outCursor, uint64(cumulativeRank))
+			}
+			outCursor += uint64(out.cumulativeRankFieldSize)
+		}
+
+		class, offset := getBlockValues(blocksize, inCursor, bits)
+		inCursor += uint64(blocksize)
+
+		cumulativeRank += uint64(class)
+
+		// we know class field size will always be 2-3 bits
+		out.encoded.Set8(out.classFieldSize, outCursor, class)
+		outCursor += uint64(out.classFieldSize)
+
+		switch {
+		case out.offsetFieldSize <= 8:
+			out.encoded.Set8(out.offsetFieldSize, outCursor, uint8(offset))
+		case out.offsetFieldSize <= 16:
+			out.encoded.Set16(out.offsetFieldSize, outCursor, uint16(offset))
+		case out.offsetFieldSize <= 32:
+			out.encoded.Set32(out.offsetFieldSize, outCursor, uint32(offset))
+		case out.offsetFieldSize <= 64:
+			out.encoded.Set64(out.offsetFieldSize, outCursor, offset)
+		}
+		outCursor += uint64(out.offsetFieldSize)
 	}
 
 	return
