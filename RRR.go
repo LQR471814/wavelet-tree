@@ -1,27 +1,31 @@
 package wavelettree
 
+import "math/bits"
+
 // RRR enables near practically O(1) calculations of bitwise rank(b, i) and
 // select(b, i)
 type RRR struct {
-	encoded BitVector
+	bits BitVector
 	// blockSize is the number of bits in a block (value from [1, 64])
 	blockSize uint8
+	// superblockSize stores the number of bits inside a super block.
+	superblockSize uint16
 	// classFieldSize is the number of bits required to store the number of 1s
 	// for each block, max: # of bits in the block
 	classFieldSize uint8
 	// offsetFieldSize is the number of bits required to store the offset for
 	// each block, max: C(n, n/2) + 1
 	offsetFieldSize uint8
-	// superblockSize stores the number of blocks to include in a super block
-	superblockSize uint8
+	// serializedBlockSize is the number of bits
+	serializedBlockSize uint8
 	// cumulativeRankFieldSize is the number of bits required to store the
 	// cumulative rank of a superblock.
 	cumulativeRankFieldSize uint8
-	// totalSuperblockSize is the number of bits a single super block takes up
-	totalSuperblockSize uint8
+	// serializedSuperblockSize is the number of bits a single super block takes up
+	serializedSuperblockSize uint16
 }
 
-func computeOffset[T uint8 | uint16 | uint32 | uint64](blocksize, bytesize, class uint8, content T) (offset uint64) {
+func rank[T uint8 | uint16 | uint32 | uint64](blocksize, bytesize, class uint8, content T) (offset uint64) {
 	remaining := class
 	mask := T(1)
 	for range bytesize {
@@ -33,27 +37,31 @@ func computeOffset[T uint8 | uint16 | uint32 | uint64](blocksize, bytesize, clas
 	return
 }
 
-func getBlockValues(blocksize uint8, i uint64, bits BitVector) (class uint8, offset uint64) {
+func unrank[T uint8 | uint16 | uint32 | uint64]() {
+
+}
+
+func getBlockValues(blocksize uint8, i uint64, bitvec BitVector) (class uint8, offset uint64) {
 	switch {
 	case blocksize <= 8:
-		content := bits.Get8(blocksize, i)
-		class = countbits(8, content)
-		offset = computeOffset(blocksize, 8, class, content)
+		content := bitvec.Get8(blocksize, i)
+		class = uint8(bits.OnesCount8(content))
+		offset = rank(blocksize, 8, class, content)
 		return
 	case blocksize <= 16:
-		content := bits.Get16(blocksize, i)
-		class = countbits(16, content)
-		offset = computeOffset(blocksize, 16, class, content)
+		content := bitvec.Get16(blocksize, i)
+		class = uint8(bits.OnesCount16(content))
+		offset = rank(blocksize, 16, class, content)
 		return
 	case blocksize <= 32:
-		content := bits.Get32(blocksize, i)
-		class = countbits(32, content)
-		offset = computeOffset(blocksize, 32, class, content)
+		content := bitvec.Get32(blocksize, i)
+		class = uint8(bits.OnesCount32(content))
+		offset = rank(blocksize, 32, class, content)
 		return
 	case blocksize <= 64:
-		content := bits.Get64(blocksize, i)
-		class = countbits(64, content)
-		offset = computeOffset(blocksize, 64, class, content)
+		content := bitvec.Get64(blocksize, i)
+		class = uint8(bits.OnesCount64(content))
+		offset = rank(blocksize, 64, class, content)
 		return
 	}
 	panic("exceeded max block length 64!")
@@ -92,9 +100,11 @@ func NewRRR(bits BitVector, opts RRROptions) (out RRR) {
 
 	superblocksize := opts.SuperBlockSize
 	if opts.SuperBlockSize < 2 {
+		// the max superblock size is 64
 		superblocksize = nbitsize
 	}
-	out.superblockSize = superblocksize
+	// the max superblock size would be 64 * 64 = 4096
+	out.superblockSize = uint16(superblocksize) * uint16(blocksize)
 
 	// the size of the class field in the serialized block
 	out.classFieldSize = floorLog2(blocksize)
@@ -113,11 +123,12 @@ func NewRRR(bits BitVector, opts RRROptions) (out RRR) {
 
 	// the serialized block size (in bits) of class + offset
 	totalBlockSize := out.classFieldSize + out.offsetFieldSize
+	out.serializedBlockSize = totalBlockSize
 	// the total size (in bits) of the serialized block
-	totalSerializedSize := blockNum*uint64(totalBlockSize) + superBlockNum*uint64(out.cumulativeRankFieldSize)
-	out.encoded = NewBitVector(totalSerializedSize)
+	totalSize := blockNum*uint64(totalBlockSize) + superBlockNum*uint64(out.cumulativeRankFieldSize)
+	out.bits = NewBitVector(totalSize)
 
-	out.totalSuperblockSize = out.cumulativeRankFieldSize + totalBlockSize
+	out.serializedSuperblockSize = uint16(out.cumulativeRankFieldSize) + uint16(totalBlockSize*superblocksize)
 
 	// serialize blocks
 	inCursor := uint64(0)
@@ -127,13 +138,13 @@ func NewRRR(bits BitVector, opts RRROptions) (out RRR) {
 		if i%uint64(superblocksize) == 0 {
 			switch {
 			case out.cumulativeRankFieldSize <= 8:
-				out.encoded.Set8(out.cumulativeRankFieldSize, outCursor, uint8(cumulativeRank))
+				out.bits.Set8(out.cumulativeRankFieldSize, outCursor, uint8(cumulativeRank))
 			case out.cumulativeRankFieldSize <= 16:
-				out.encoded.Set16(out.cumulativeRankFieldSize, outCursor, uint16(cumulativeRank))
+				out.bits.Set16(out.cumulativeRankFieldSize, outCursor, uint16(cumulativeRank))
 			case out.cumulativeRankFieldSize <= 32:
-				out.encoded.Set32(out.cumulativeRankFieldSize, outCursor, uint32(cumulativeRank))
+				out.bits.Set32(out.cumulativeRankFieldSize, outCursor, uint32(cumulativeRank))
 			case out.cumulativeRankFieldSize <= 64:
-				out.encoded.Set64(out.cumulativeRankFieldSize, outCursor, uint64(cumulativeRank))
+				out.bits.Set64(out.cumulativeRankFieldSize, outCursor, uint64(cumulativeRank))
 			}
 			outCursor += uint64(out.cumulativeRankFieldSize)
 		}
@@ -144,18 +155,18 @@ func NewRRR(bits BitVector, opts RRROptions) (out RRR) {
 		cumulativeRank += uint64(class)
 
 		// we know class field size will always be 2-3 bits
-		out.encoded.Set8(out.classFieldSize, outCursor, class)
+		out.bits.Set8(out.classFieldSize, outCursor, class)
 		outCursor += uint64(out.classFieldSize)
 
 		switch {
 		case out.offsetFieldSize <= 8:
-			out.encoded.Set8(out.offsetFieldSize, outCursor, uint8(offset))
+			out.bits.Set8(out.offsetFieldSize, outCursor, uint8(offset))
 		case out.offsetFieldSize <= 16:
-			out.encoded.Set16(out.offsetFieldSize, outCursor, uint16(offset))
+			out.bits.Set16(out.offsetFieldSize, outCursor, uint16(offset))
 		case out.offsetFieldSize <= 32:
-			out.encoded.Set32(out.offsetFieldSize, outCursor, uint32(offset))
+			out.bits.Set32(out.offsetFieldSize, outCursor, uint32(offset))
 		case out.offsetFieldSize <= 64:
-			out.encoded.Set64(out.offsetFieldSize, outCursor, offset)
+			out.bits.Set64(out.offsetFieldSize, outCursor, offset)
 		}
 		outCursor += uint64(out.offsetFieldSize)
 	}
@@ -166,5 +177,27 @@ func NewRRR(bits BitVector, opts RRROptions) (out RRR) {
 // Rank returns the number of "bit" encountered from [0, i] in the bitvector
 // where "bit" is either 0 or 1
 func (r RRR) Rank(bit uint8, i uint64) uint64 {
-	return 0
+	superblockIdx := i / uint64(r.superblockSize)
+	superblockBitIdx := superblockIdx * uint64(r.serializedSuperblockSize)
+
+	var rank uint64
+	switch {
+	case r.cumulativeRankFieldSize <= 8:
+		rank = uint64(r.bits.Get8(r.cumulativeRankFieldSize, superblockBitIdx))
+	case r.cumulativeRankFieldSize <= 16:
+		rank = uint64(r.bits.Get16(r.cumulativeRankFieldSize, superblockBitIdx))
+	case r.cumulativeRankFieldSize <= 32:
+		rank = uint64(r.bits.Get32(r.cumulativeRankFieldSize, superblockBitIdx))
+	case r.cumulativeRankFieldSize <= 64:
+		rank = uint64(r.bits.Get64(r.cumulativeRankFieldSize, superblockBitIdx))
+	}
+
+	originalIdx := superblockIdx * uint64(r.superblockSize)
+	cursor := superblockBitIdx + uint64(r.cumulativeRankFieldSize)
+	for {
+		rank += uint64(r.bits.Get8(r.classFieldSize, cursor))
+		cursor += uint64(r.classFieldSize)
+	}
+
+	return rank
 }

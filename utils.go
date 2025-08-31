@@ -34,13 +34,3 @@ func choose(n, k uint64) (result uint64) {
 	}
 	return result
 }
-
-func countbits[T uint8 | uint16 | uint32 | uint64](bytesize uint8, value T) (count uint8) {
-	mask := T(1)
-	for range bytesize {
-		if value&mask > 0 {
-			count++
-		}
-	}
-	return
-}

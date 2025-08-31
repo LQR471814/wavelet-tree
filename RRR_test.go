@@ -56,6 +56,6 @@ func TestNewRRR(t *testing.T) {
 	)
 	t.Log(
 		"size(all):",
-		out.encoded.bitlength,
+		out.bits.bitlength,
 	)
 }
