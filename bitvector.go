@@ -131,96 +131,162 @@ func (v BitVector) Append64(size uint8, value uint64) BitVector {
 // - bitsize can be any number of bits from 1-64
 // - bytesize must be one of 8, 16, 32, or 64
 func getbits[T uint8 | uint16 | uint32 | uint64](bytesize, bitsize uint8, v BitVector, i uint64) (result T) {
-	if i >= v.bitlength {
+	if i > v.bitlength-uint64(bitsize) {
 		panic(fmt.Sprintf("get bit index out of range: [%d]", i))
 	}
 
 	byteslice := *(*[]T)(unsafe.Pointer(&v.bytes))
 
 	byte := i / uint64(bytesize)
-	bit := uint8(i % uint64(bytesize))
+	bitstart := uint8(i % uint64(bytesize))
 
-	allones := ^T(0)
+	ALL_ONES := ^T(0)
 
-	// mask creates a bit mask that has 1's in the places for the
-	// target bit being retrieved.
-	var mask T = allones >> (bytesize - bit)
-
-	result = (byteslice[byte] >> bit) & mask
-
-	// overlap threshold stores the index at which the rest of the
-	// bits would spill over to the next byte/uint
-	var overlapThreshold uint8 = (bytesize + 1) - bitsize
+	mask := ALL_ONES << bitstart
+	retrieved := byteslice[byte]
+	result = (retrieved & mask) >> bitstart
 
 	// amount of bits set in the current byte
-	var currentSet = bytesize - bit
+	var currentSet = bytesize - bitstart
 
-	// overlap amount is: amount of bits to be found in the next byte after
-	// bits are found in current byte
+	var overlapThreshold uint8 = (bytesize + 1) - bitsize
 	var overlapAmount uint8 = bitsize - currentSet
 
-	if bit >= overlapThreshold {
-		next := byteslice[byte+1]
-		var nextmask T = allones >> overlapAmount
-		var overlap T = next & nextmask
+	// ## params
+	// - byte -> which byte to query from
+	// - bitstart -> which bit in that byte to start setting
+	// - overlapThreshold -> if bitstart > overlapThreshold then some bits will
+	// spill over to the next byte
+	// - overlapAmount -> amount of bits to be retrieved in the next byte
+
+	// ## bit representations
+	// - mask -> which bits in the current byte pertain to the bits to be retrieved
+	// - retrieved -> bits in the current byte
+	//
+	// - nextMask -> which bits in the next byte pertain to bits that should be retrieved
+	// - nextRetrieved -> bits in the next byte that have been retrieved
+
+	// fmt.Printf(
+	// 	"GET PARAMS | byte: %d | bitstart: %d | overlapThreshold: %d | overlapAmount: %d\n",
+	// 	byte,
+	// 	bitstart,
+	// 	overlapThreshold,
+	// 	overlapAmount,
+	// )
+	//
+	// fmt.Printf(
+	// 	fmt.Sprintf(
+	// 		"GET BITS | mask: %%0%[1]db | retrieved: %%0%[1]db | final: %%0%[1]db\n",
+	// 		bytesize,
+	// 	),
+	// 	mask,
+	// 	retrieved,
+	// 	result,
+	// )
+
+	if bitstart >= overlapThreshold {
+		nextRetrieved := byteslice[byte+1]
+
+		nextMask := ^(ALL_ONES << overlapAmount)
+		overlap := nextRetrieved & nextMask
 		result = result | (overlap << currentSet)
+
+		// fmt.Printf(
+		// 	fmt.Sprintf(
+		// 		"GET NEXT BITS | mask: %%0%[1]db | nextRetrieved: %%0%[1]db | final: %%0%[1]db\n",
+		// 		bytesize,
+		// 	),
+		// 	nextMask,
+		// 	nextRetrieved,
+		// 	result,
+		// )
 	}
 
 	return
 }
 
 func setbits[T uint8 | uint16 | uint32 | uint64](bytesize, bitsize uint8, v BitVector, i uint64, value T) {
-	if i >= v.bitlength {
+	// suppose bitlength = 25
+	// bitsize = 8
+	// the maximum index would be 25 - 8 = 17
+	// that is, it would set indices [17, 24]
+	if i > v.bitlength-uint64(bitsize) {
 		panic(fmt.Sprintf("set bit index out of range: [%d]", i))
 	}
 
 	byteslice := *(*[]T)(unsafe.Pointer(&v.bytes))
 
 	byte := i / uint64(bytesize)
-	bit := uint8(i % uint64(bytesize))
+	bitstart := uint8(i % uint64(bytesize))
 
-	fmt.Println(byte, bit)
+	ALL_ONES := ^T(0)
 
-	allones := ^T(0)
+	mask := ^(ALL_ONES << bitstart)
+	newCurrent := value << bitstart
 
-	// mask creates a bit mask that has 1's in the places for the
-	// target bit being retrieved.
-	var mask T = allones >> (bytesize - bit)
+	original := byteslice[byte] & mask
+	byteslice[byte] = original | newCurrent
 
-	value = value & mask
+	overlapThreshold := (bytesize + 1) - bitsize
 
-	// bit defines everything including and after a particular bit index to be
-	// the set content, therefore the underlying content that should be kept
-	// would be the inverse of everything including and after the particular
-	// bit index
-	underlying := byteslice[byte] & ^mask
-	byteslice[byte] = underlying | (value << bit)
+	bitsSet := bytesize - bitstart
+	overlapAmount := bitsize - bitsSet
 
-	fmt.Printf("set: %016b | underlying(mask): %016b | underlying: %016b\n", value, underlying, byteslice[byte])
+	// ## params
+	// - byte -> which byte to query from
+	// - bitstart -> which bit in that byte to start setting bits from
+	// - overlapThreshold -> if bitstart > overlapThreshold then some bits will
+	// spill over to the next byte
+	// - overlapAmount -> amount of bits to be set in the next byte
 
-	// overlap threshold stores the index at which the rest of the
-	// bits would spill over to the next byte/uint
-	var overlapThreshold uint8 = (bytesize + 1) - bitsize
+	// ## bit representations
+	// - value -> the bits to set starting from `bitstart`
+	//
+	// - mask -> which bits in the current byte will NOT be set to the new value
+	// - newCurrent -> the bits to update in the current byte
+	//
+	// - nextMask -> which bits in the next byte will NOT be set to the part of
+	// the new value in the next byte
+	// - nextNewCurrent -> the bits to update in the next byte
 
-	fmt.Printf("%d + 1 - %d = %d\n", bytesize, bitsize, overlapThreshold)
+	// fmt.Printf(
+	// 	"SET PARAMS | byte: %d | bitstart: %d | overlapThreshold: %d | overlapAmount: %d\n",
+	// 	byte,
+	// 	bitstart,
+	// 	overlapThreshold,
+	// 	overlapAmount,
+	// )
+	//
+	// fmt.Printf(
+	// 	fmt.Sprintf(
+	// 		"SET BITS | value: %%0%[1]db | mask: %%0%[1]db | newCurrent: %%0%[1]db | final: %%0%[1]db\n",
+	// 		bytesize,
+	// 	),
+	// 	value,
+	// 	mask,
+	// 	newCurrent,
+	// 	original|newCurrent,
+	// )
 
-	// amount of bits set in the current byte
-	var currentSet uint8 = bytesize - bit
-
-	// overlap amount is: amount of bits to be found in the next byte after
-	// bits are found in current byte
-	var overlapAmount uint8 = bitsize - currentSet
-
-	if bit >= overlapThreshold {
+	if bitstart >= overlapThreshold {
 		next := byteslice[byte+1]
-		var nextMask T = allones >> overlapAmount
-		nextupSurround := next & (^nextMask)
+		var nextMask T = ALL_ONES << overlapAmount
+		nextupOriginal := next & nextMask
+		nextNewCurrent := value >> bitsSet
 
-		fmt.Printf("next: %016b | nextmask: %016b\n", next, nextMask)
+		// fmt.Printf(
+		// 	fmt.Sprintf(
+		// 		"SET NEXT BITS | mask: %%0%[1]db | newCurrent: %%0%[1]db | final: %%0%[1]db\n",
+		// 		bytesize,
+		// 	),
+		// 	nextMask,
+		// 	nextNewCurrent,
+		// 	nextupOriginal|nextNewCurrent,
+		// )
 
 		// remove the bits in value that have already been set in the current
 		// byte and set those bits in the next byte
-		byteslice[byte+1] = nextupSurround | (value >> currentSet)
+		byteslice[byte+1] = nextupOriginal | nextNewCurrent
 	}
 }
 
