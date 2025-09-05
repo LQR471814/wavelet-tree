@@ -192,12 +192,12 @@ func (r RRR) Rank(bit uint8, i uint64) uint64 {
 		rank = uint64(r.bits.Get64(r.cumulativeRankFieldSize, superblockBitIdx))
 	}
 
-	originalIdx := superblockIdx * uint64(r.superblockSize)
-	cursor := superblockBitIdx + uint64(r.cumulativeRankFieldSize)
-	for {
-		rank += uint64(r.bits.Get8(r.classFieldSize, cursor))
-		cursor += uint64(r.classFieldSize)
-	}
+	// originalIdx := superblockIdx * uint64(r.superblockSize)
+	// cursor := superblockBitIdx + uint64(r.cumulativeRankFieldSize)
+	// for {
+	// 	rank += uint64(r.bits.Get8(r.classFieldSize, cursor))
+	// 	cursor += uint64(r.classFieldSize)
+	// }
 
 	return rank
 }

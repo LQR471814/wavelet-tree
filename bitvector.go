@@ -15,7 +15,7 @@ func NewBitVector(bitlength uint64) BitVector {
 	bytelength := bitlength/8 + 1
 	vec := BitVector{
 		bitlength: bitlength,
-		bytes:     make([]uint8, bytelength),
+		bytes:     make([]byte, bytelength),
 	}
 	return vec
 }
@@ -144,7 +144,7 @@ func getbits[T uint8 | uint16 | uint32 | uint64](bytesize, bitsize uint8, v BitV
 
 	// mask creates a bit mask that has 1's in the places for the
 	// target bit being retrieved.
-	var mask T = allones >> (bytesize - bitsize)
+	var mask T = allones >> (bytesize - bit)
 
 	result = (byteslice[byte] >> bit) & mask
 
@@ -179,20 +179,30 @@ func setbits[T uint8 | uint16 | uint32 | uint64](bytesize, bitsize uint8, v BitV
 	byte := i / uint64(bytesize)
 	bit := uint8(i % uint64(bytesize))
 
+	fmt.Println(byte, bit)
+
 	allones := ^T(0)
 
 	// mask creates a bit mask that has 1's in the places for the
 	// target bit being retrieved.
-	var mask T = allones >> (bytesize - bitsize)
+	var mask T = allones >> (bytesize - bit)
 
 	value = value & mask
 
-	surrounding := byteslice[byte] & (^mask)
-	byteslice[byte] = surrounding | (value << bit)
+	// bit defines everything including and after a particular bit index to be
+	// the set content, therefore the underlying content that should be kept
+	// would be the inverse of everything including and after the particular
+	// bit index
+	underlying := byteslice[byte] & ^mask
+	byteslice[byte] = underlying | (value << bit)
+
+	fmt.Printf("set: %016b | underlying(mask): %016b | underlying: %016b\n", value, underlying, byteslice[byte])
 
 	// overlap threshold stores the index at which the rest of the
 	// bits would spill over to the next byte/uint
 	var overlapThreshold uint8 = (bytesize + 1) - bitsize
+
+	fmt.Printf("%d + 1 - %d = %d\n", bytesize, bitsize, overlapThreshold)
 
 	// amount of bits set in the current byte
 	var currentSet uint8 = bytesize - bit
@@ -205,6 +215,8 @@ func setbits[T uint8 | uint16 | uint32 | uint64](bytesize, bitsize uint8, v BitV
 		next := byteslice[byte+1]
 		var nextMask T = allones >> overlapAmount
 		nextupSurround := next & (^nextMask)
+
+		fmt.Printf("next: %016b | nextmask: %016b\n", next, nextMask)
 
 		// remove the bits in value that have already been set in the current
 		// byte and set those bits in the next byte
