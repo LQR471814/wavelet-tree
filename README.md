@@ -6,16 +6,41 @@
 
 - Efficient storage with bit-packing.
 - Fast calculation of $\text{rank}(b, i)$ with RRR.
+- Well-tested.
 
-## Why?
+## What does this even do?
 
-The compression ratio for the wavelet tree isn't the greatest when
-compared to other string compression algorithms but it is much
-faster for doing lookups.
+You may not have heard of the wavelet tree data structure before,
+so here's a quick sales pitch.
 
-So if you need to store multiple strings in memory and have random
-access while still enjoying the memory efficiency improvements of
-compression, you may want to consider a wavelet tree.
+The wavelet tree data structure is a string compression
+data structure that is very fast at doing *lookups* with a decent
+compression ratio.
+
+Here's an example of a scenario where it would be useful:
+
+> Let's suppose you have to store (some large number) of names in
+> a database. You want to save on storage costs by compressing
+> these strings, but cannot compromise on lookup times when you
+> need to lookup a name associated with a customer ID.
+>
+> If you use a traditional string compression algorithm like LZ4,
+> you will need to decompress and recompress all of the strings at
+> once per transaction (which will increase latency), compress
+> each string individually (which will increase overhead), or
+> compress in chunks (which will only have dubious effects on
+> latency).
+>
+> You also cannot just keep all the strings uncompressed in
+> memory! Remember, this is a *very* large number of strings. You
+> may be able to offload uncompressed strings into a large
+> persistent storage medium, but you will suffer latency costs for
+> it.
+>
+> If only there was a method of achieving broad compression of
+> many strings along with speedy random access of such strings.
+
+Behold, the wavelet tree.
 
 ## Explainers
 
