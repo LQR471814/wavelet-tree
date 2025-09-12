@@ -37,8 +37,9 @@ Here's an example of a scenario where it would be useful:
 > persistent storage medium, but you will suffer latency costs for
 > it.
 >
-> If only there was a method of achieving broad compression of
-> many strings along with speedy random access of such strings.
+> If only there was a data structure capable of compressing many
+> strings while retaining fast and efficient random access of such
+> strings.
 
 Behold, the wavelet tree.
 
