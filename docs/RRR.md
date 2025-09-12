@@ -78,7 +78,7 @@ $$
 
 The [combinatorial number system](https://en.wikipedia.org/wiki/Combinatorial_number_system)
 gives the relationship between a number and the possible
-combinations of unique subsets of a size $r$for a given set $S$.
+combinations of unique subsets of a size $r$ for a given set $S$.
 
 > [!NOTE]
 > The letter $k$ is more commonly used for the size of the subset
