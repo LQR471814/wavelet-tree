@@ -102,7 +102,6 @@ something like this:
 
 ![mapping of subsets into bitvectors](https://upload.wikimedia.org/wikipedia/commons/8/85/Combinatorial_number_system%3B_5_choose_3.svg)
 
-> [!QUOTE]
 > WatchduckYou can name the author as "T. Piesk", "Tilman Piesk"
 > or "Watchduck"., CC BY 4.0
 > <https://creativecommons.org/licenses/by/4.0>, via Wikimedia
@@ -132,7 +131,6 @@ $$
 c_{i} > ... > c_{2} > c_{1} \geq 0
 $$
 
-> [!EXAMPLE]
 > Using the row at offset 2 in the table. (the third row)
 >
 > The subset would be $c=\{0, 2, 3\}$.
