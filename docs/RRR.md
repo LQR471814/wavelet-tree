@@ -74,3 +74,87 @@ $$
 k = \log_{2}(n)
 $$
 
+## Finding offsets
+
+The [combinatorial number system](https://en.wikipedia.org/wiki/Combinatorial_number_system)
+gives the relationship between a number and the possible
+combinations of unique subsets of a size $r$for a given set $S$.
+
+> [!NOTE]
+> The letter $k$ is more commonly used for the size of the subset
+> rather than $r$. I used $r$ because it is more commonly used
+> when talking about counting.
+
+The total number of these subsets is more commonly computed with
+
+$$
+\binom{n}{r}
+$$
+
+Where $n$ is the number of elements in set $S$ and $r$ is the size
+of each unique subset.
+
+Let's suppose we have a 5 element set $S$ which we want to find
+all combinations of 3 element subsets.
+
+If we were to list them out in a tabular format, it would look
+something like this:
+
+![mapping of subsets into bitvectors](https://upload.wikimedia.org/wikipedia/commons/8/85/Combinatorial_number_system%3B_5_choose_3.svg)
+
+> [!QUOTE]
+> WatchduckYou can name the author as "T. Piesk", "Tilman Piesk"
+> or "Watchduck"., CC BY 4.0
+> <https://creativecommons.org/licenses/by/4.0>, via Wikimedia
+> Commons
+
+You can ignore the numbers inside the red boxes. But doesn't this
+look just like all the possible combinations of 5-bit block
+where 3 bits are set to 1?
+
+In other words, this provides the **offset** for all the possible
+combinations of blocks of **class** 3.
+
+Well then the question becomes, how do you compute the offset for
+a given combination?
+
+The offset $N$ of a given subset is given by the following
+relationship.
+
+$$
+N = \binom{c_{r}}{r} + \dots + \binom{c_{2}}{2} + \binom{c_1}{1}
+  = \sum_{i = 1}^{r} \binom{c_{i}}{i}
+$$
+
+The values of $c_{i}$ follow a strictly decreasing relationship:
+
+$$
+c_{i} > ... > c_{2} > c_{1} \geq 0
+$$
+
+> [!EXAMPLE]
+> Using the row at offset 2 in the table. (the third row)
+>
+> The subset would be $c=\{0, 2, 3\}$.
+> ($c_{1}= 0$, $c_{2} = 2$, $c_{3} = 3$)
+>
+> $$R = \binom{0}{1} + \binom{2}{2} + \binom{3}{3} = 2$$
+>
+> The offset is the expected value 2.
+
+This operation of finding a number for a particular subset is
+commonly called "ranking". (though it is different from the
+$\text{rank}(b, i)$ operation of RRR)
+
+The opposite process, "unranking" derives a subset from a given
+offset.
+
+Unranking involves an algorithm better expressed with pseudo-code:
+
+```
+while N > 0:
+    find the largest value of 'c' such that nCr(c, r) <= N
+    N = N - nCr(c, r)
+    r = r - 1
+```
+
