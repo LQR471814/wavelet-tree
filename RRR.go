@@ -1,6 +1,8 @@
 package wavelettree
 
-import "math/bits"
+import (
+	"math/bits"
+)
 
 // RRR enables near practically O(1) calculations of bitwise rank(b, i) and
 // select(b, i)
@@ -25,20 +27,46 @@ type RRR struct {
 	serializedSuperblockSize uint16
 }
 
-func rank[T uint8 | uint16 | uint32 | uint64](blocksize, bytesize, class uint8, content T) (offset uint64) {
-	remaining := class
+// rank computes the offset given a block of bits
+func rank[T uint8 | uint16 | uint32 | uint64](blocksize uint8, content T) (offset uint64) {
+	combIndex := 0
 	mask := T(1)
-	for range bytesize {
+	for pos := range blocksize {
 		if content&mask > 0 {
-			offset += choose(uint64(blocksize-1), uint64(remaining))
+			offset += choose(uint64(pos), uint64(combIndex+1))
+			combIndex++
 		}
 		mask <<= 1
 	}
 	return
 }
 
-func unrank[T uint8 | uint16 | uint32 | uint64]() {
-
+func unrank[T uint8 | uint16 | uint32 | uint64](class uint8, offset uint64) (content T) {
+	// special case: 0
+	if class == 0 {
+		return 0
+	}
+	combIndex := class - 1
+	remaining := offset
+	for {
+		var position uint8
+		var lastcontrib uint64
+		for pos := combIndex + 1; ; pos++ {
+			contrib := choose(uint64(pos), uint64(combIndex+1))
+			if contrib > uint64(remaining) {
+				position = pos - 1
+				remaining -= lastcontrib
+				break
+			}
+			lastcontrib = contrib
+		}
+		content |= (1 << position)
+		if combIndex == 0 {
+			break
+		}
+		combIndex--
+	}
+	return
 }
 
 func getBlockValues(blocksize uint8, i uint64, bitvec BitVector) (class uint8, offset uint64) {
@@ -46,22 +74,22 @@ func getBlockValues(blocksize uint8, i uint64, bitvec BitVector) (class uint8, o
 	case blocksize <= 8:
 		content := bitvec.Get8(blocksize, i)
 		class = uint8(bits.OnesCount8(content))
-		offset = rank(blocksize, 8, class, content)
+		offset = rank(blocksize, content)
 		return
 	case blocksize <= 16:
 		content := bitvec.Get16(blocksize, i)
 		class = uint8(bits.OnesCount16(content))
-		offset = rank(blocksize, 16, class, content)
+		offset = rank(blocksize, content)
 		return
 	case blocksize <= 32:
 		content := bitvec.Get32(blocksize, i)
 		class = uint8(bits.OnesCount32(content))
-		offset = rank(blocksize, 32, class, content)
+		offset = rank(blocksize, content)
 		return
 	case blocksize <= 64:
 		content := bitvec.Get64(blocksize, i)
 		class = uint8(bits.OnesCount64(content))
-		offset = rank(blocksize, 64, class, content)
+		offset = rank(blocksize, content)
 		return
 	}
 	panic("exceeded max block length 64!")
