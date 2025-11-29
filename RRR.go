@@ -12,11 +12,15 @@ type RRR struct {
 	// blockLogicalSize is the logical number of bits in a block uncompressed
 	// (value from [1, 64])
 	blockLogicalSize uint8
+	// superblockLogicalCapacity is the logical number of blocks contained
+	// within a super block
+	superblockLogicalCapacity uint8
 	// superblockLogicalSize is the logical number of bits in a super block
 	// uncompressed
 	superblockLogicalSize uint16
 	// classFieldActualSize is the number of bits required to store the class
-	// field for each block. max: # of bits in the block
+	// field for each block. max: # of bits in the block (this one will always
+	// be 2-3 bits)
 	classFieldActualSize uint8
 	// offsetFieldActualSize is the number of bits required to store the offset
 	// for each block. max: C(n, n/2) + 1
@@ -63,13 +67,13 @@ func NewRRR(bits BitVector, opts RRROptions) (out RRR) {
 	}
 	out.blockLogicalSize = blocksize
 
-	superblocksize := opts.SuperBlockSize
+	out.superblockLogicalCapacity = opts.SuperBlockSize
 	if opts.SuperBlockSize < 2 {
 		// the max superblock size is 64
-		superblocksize = nbitsize
+		out.superblockLogicalCapacity = nbitsize
 	}
 	// the max superblock size would be 64 * 64 = 4096
-	out.superblockLogicalSize = uint16(superblocksize) * uint16(blocksize)
+	out.superblockLogicalSize = uint16(out.superblockLogicalCapacity) * uint16(blocksize)
 
 	// the size of the class field in the serialized block
 	out.classFieldActualSize = floorLog2(blocksize)
@@ -84,7 +88,7 @@ func NewRRR(bits BitVector, opts RRROptions) (out RRR) {
 	blockNum := n / uint64(blocksize)
 	// there is additional +1 because even if n cannot "fit" a single super
 	// block, it will still be added at the start anyway
-	superBlockNum := n/(uint64(blocksize)*uint64(superblocksize)) + 1
+	superBlockNum := n/(uint64(blocksize)*uint64(out.superblockLogicalCapacity)) + 1
 
 	// the serialized block size (in bits) of class + offset
 	totalBlockSize := out.classFieldActualSize + out.offsetFieldActualSize
@@ -93,14 +97,14 @@ func NewRRR(bits BitVector, opts RRROptions) (out RRR) {
 	totalSize := blockNum*uint64(totalBlockSize) + superBlockNum*uint64(out.cumulativeRankFieldActualSize)
 	out.bits = NewBitVector(totalSize)
 
-	out.superblockActualSize = uint16(out.cumulativeRankFieldActualSize) + uint16(totalBlockSize*superblocksize)
+	out.superblockActualSize = uint16(out.cumulativeRankFieldActualSize) + uint16(totalBlockSize*out.superblockLogicalCapacity)
 
 	// serialize blocks
 	inCursor := uint64(0)
 	outCursor := uint64(0)
 	cumulativeRank := uint64(0)
 	for i := range blockNum {
-		if i%uint64(superblocksize) == 0 {
+		if i%uint64(out.superblockLogicalCapacity) == 0 {
 			switch {
 			case out.cumulativeRankFieldActualSize <= 8:
 				out.bits.Set8(out.cumulativeRankFieldActualSize, outCursor, uint8(cumulativeRank))
@@ -144,21 +148,68 @@ func NewRRR(bits BitVector, opts RRROptions) (out RRR) {
 // To get the number of 0-bits encountered, simply do i-rank(i).
 func (r RRR) Rank(i uint64) uint64 {
 	superblockIdx := i / uint64(r.superblockLogicalSize)
-	superblockBitIdx := superblockIdx * uint64(r.superblockActualSize)
+	remainder := i % uint64(r.superblockLogicalCapacity)
+	blockIdx := remainder / uint64(r.blockLogicalSize)
+	remainder = remainder % uint64(r.blockLogicalSize)
 
-	var rank uint64
+	cursor := superblockIdx * uint64(r.superblockActualSize)
+	var ones uint64
 	switch {
 	case r.cumulativeRankFieldActualSize <= 8:
-		rank = uint64(r.bits.Get8(r.cumulativeRankFieldActualSize, superblockBitIdx))
+		ones = uint64(r.bits.Get8(r.cumulativeRankFieldActualSize, cursor))
 	case r.cumulativeRankFieldActualSize <= 16:
-		rank = uint64(r.bits.Get16(r.cumulativeRankFieldActualSize, superblockBitIdx))
+		ones = uint64(r.bits.Get16(r.cumulativeRankFieldActualSize, cursor))
 	case r.cumulativeRankFieldActualSize <= 32:
-		rank = uint64(r.bits.Get32(r.cumulativeRankFieldActualSize, superblockBitIdx))
+		ones = uint64(r.bits.Get32(r.cumulativeRankFieldActualSize, cursor))
 	case r.cumulativeRankFieldActualSize <= 64:
-		rank = uint64(r.bits.Get64(r.cumulativeRankFieldActualSize, superblockBitIdx))
+		ones = uint64(r.bits.Get64(r.cumulativeRankFieldActualSize, cursor))
+	}
+	// ones = number of ones < the superblock containing "i"
+
+	cursor += uint64(r.cumulativeRankFieldActualSize)
+	idx := uint64(0)
+	for {
+		class := r.bits.Get8(r.classFieldActualSize, cursor)
+		var offset uint64
+		switch {
+		case r.offsetFieldActualSize <= 8:
+			offset = uint64(r.bits.Get8(r.offsetFieldActualSize, cursor+uint64(r.classFieldActualSize)))
+		case r.offsetFieldActualSize <= 16:
+			offset = uint64(r.bits.Get16(r.offsetFieldActualSize, cursor+uint64(r.classFieldActualSize)))
+		case r.offsetFieldActualSize <= 32:
+			offset = uint64(r.bits.Get32(r.offsetFieldActualSize, cursor+uint64(r.classFieldActualSize)))
+		case r.offsetFieldActualSize <= 64:
+			offset = uint64(r.bits.Get64(r.offsetFieldActualSize, cursor+uint64(r.classFieldActualSize)))
+		}
+
+		if idx == blockIdx {
+			switch {
+			case r.blockLogicalSize <= 8:
+				block := unrank[uint8](class, offset)
+				// mask away bits beyond the remainder after the target blockIdx
+				block &= (^uint8(0)) >> (r.blockLogicalSize - uint8(remainder))
+				ones += uint64(bits.OnesCount8(block))
+			case r.blockLogicalSize <= 16:
+				block := unrank[uint16](class, offset)
+				block &= (^uint16(0)) >> (r.blockLogicalSize - uint8(remainder))
+				ones += uint64(bits.OnesCount16(block))
+			case r.blockLogicalSize <= 32:
+				block := unrank[uint32](class, offset)
+				block &= (^uint32(0)) >> (r.blockLogicalSize - uint8(remainder))
+				ones += uint64(bits.OnesCount32(block))
+			case r.blockLogicalSize <= 64:
+				block := unrank[uint64](class, offset)
+				block &= (^uint64(0)) >> (r.blockLogicalSize - uint8(remainder))
+				ones += uint64(bits.OnesCount64(block))
+			}
+			break
+		}
+		ones += uint64(class)
+		cursor += uint64(r.blockActualSize)
+		idx++
 	}
 
-	return rank
+	return ones
 }
 
 // Select returns the i'th "bit" in the bitvector, where "bit" can either be 0
@@ -169,7 +220,14 @@ func (r RRR) Select(bit uint8, i uint64) {
 	}
 
 	bitlength := r.bits.Length()
-	bitlength.uint64(r.superblockLogicalSize)
+	lo := uint64(0)
+	hi := bitlength / uint64(r.superblockActualSize) // index of last super block
+
+	// find via binary search, the maximum superblock that
+	for {
+		mid := (lo + hi) / 2
+	}
+
 }
 
 // rank computes the offset given a block of bits
