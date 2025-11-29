@@ -74,24 +74,19 @@ $$
 k = \log_{2}(n)
 $$
 
-## Finding offsets
+## Finding offsets for a block
 
 The [combinatorial number system](https://en.wikipedia.org/wiki/Combinatorial_number_system)
 gives the relationship between a number and the possible
-combinations of unique subsets of a size $r$ for a given set $S$.
-
-> [!NOTE]
-> The letter $k$ is more commonly used for the size of the subset
-> rather than $r$. I used $r$ because it is more commonly used
-> when talking about counting.
+combinations of unique subsets of a size $k$ for a given set $S$.
 
 The total number of these subsets is more commonly computed with
 
 $$
-\binom{n}{r}
+\binom{n}{k}
 $$
 
-Where $n$ is the number of elements in set $S$ and $r$ is the size
+Where $n$ is the number of elements in set $S$ and $k$ is the size
 of each unique subset.
 
 Let's suppose we have a 5 element set $S$ which we want to find
@@ -100,7 +95,7 @@ all combinations of 3 element subsets.
 If we were to list them out in a tabular format, it would look
 something like this:
 
-![mapping of subsets into bitvectors](https://upload.wikimedia.org/wikipedia/commons/8/85/Combinatorial_number_system%3B_5_choose_3.svg)
+![subsets table](https://upload.wikimedia.org/wikipedia/commons/8/85/Combinatorial_number_system%3B_5_choose_3.svg)
 
 > WatchduckYou can name the author as "T. Piesk", "Tilman Piesk"
 > or "Watchduck"., CC BY 4.0
@@ -108,51 +103,81 @@ something like this:
 > Commons
 
 You can ignore the numbers inside the red boxes. But doesn't this
-look just like all the possible combinations of 5-bit block
-where 3 bits are set to 1?
+look just like all the possible combinations of a 5-bit block
+where 3 bits are set to 1? (where everything in red is a 1,
+everything white is a 0)
 
-In other words, this provides the **offset** for all the possible
-combinations of blocks of **class** 3.
+In other words, the row number provides the **offset** for all the
+possible combinations of blocks of **class** 3. A unique number
+associated with every possible combination of block with class 3.
 
-Well then the question becomes, how do you compute the offset for
-a given combination?
+Then the question becomes, how do you compute the offset for a
+given combination?
 
-The offset $N$ of a given subset is given by the following
-relationship.
+Let's say the set consists of the 1-bit positions (starting from
+0), say (ordered from least to greatest):
+
+$B = [0, 1, 3]$
+
+The offset of the subset $B$, is given by:
 
 $$
-N = \binom{c_{r}}{r} + \dots + \binom{c_{2}}{2} + \binom{c_1}{1}
-  = \sum_{i = 1}^{r} \binom{c_{i}}{i}
+\sum_{i=0}^{|B|-1} \binom{B[i]}{i+1}
 $$
 
-The values of $c_{i}$ follow a strictly decreasing relationship:
+> Where $B[i]$ means the element at index $i$ in the list $B$, and
+> $|B|$ gives the length of the list.
 
 $$
-c_{i} > ... > c_{2} > c_{1} \geq 0
+\binom{0}{1} + \binom{1}{2} + \binom{3}{3} = 1
 $$
-
-> Using the row at offset 2 in the table. (the third row)
->
-> The subset would be $c=\{0, 2, 3\}$.
-> ($c_{1}= 0$, $c_{2} = 2$, $c_{3} = 3$)
->
-> $$R = \binom{0}{1} + \binom{2}{2} + \binom{3}{3} = 2$$
->
-> The offset is the expected value 2.
 
 This operation of finding a number for a particular subset is
 commonly called "ranking". (though it is different from the
 $\text{rank}(b, i)$ operation of RRR)
 
-The opposite process, "unranking" derives a subset from a given
-offset.
+## Finding a block from an offset
+
+The opposite process, "unranking" derives a block (possible
+subset) from a given offset.
+
+This process is not unlike the conversion of numbers between
+different bases. Just that it involves combinatorics instead of
+exponentials.
+
+Here is an example to illustrate:
+
+Suppose you were to find the combination of size 4 for a set of 8
+elements at offset 30.
+
+The values of $\binom{n}{4}$ for values of $n=5,6,7$ you have the
+values $5,15,35$.
+
+The largest value $15 \leq 30$ is $\binom{6}{4}$. We know that the
+4th 1-bit position is $6$. ($[a,b,c,6]$)
+
+We then do this again for $15$, the values of $\binom{n}{3}$ for
+successive values of $n=4,5,6$ are $4,10,20$, so $10 \leq 15$, the
+3rd 1-bit position is $5$. ($[a,b,5,6]$)
+
+We then do this again for $5$. $n=3$, $\binom{3}{2}=3$, The 2nd
+1-bit position is $3$ ($[a,3,5,6]$).
+
+We then do this again for $2$. $n=2$, $\binom{2}{1}=4$. The 1st
+1-bit position is $2$? ($[2,3,5,6]$)
+
+Thus, the bit vector for block of size 8, with class 4, and offset
+30 is:
+
+$[0,0,1,1,0,1,1,0]$
 
 Unranking involves an algorithm better expressed with pseudo-code:
 
-```
-while N > 0:
-    find the largest value of 'c' such that nCr(c, r) <= N
-    N = N - nCr(c, r)
-    r = r - 1
-```
+> [!NOTE]
+> If you end up with a value of $0$ but still have combination
+> positions to fill. Then you would want to choose the "maximal"
+> value for the combination element at index $i$. Namely, the
+> maximum value for $n$ such that $\binom{n}{i+1}=0$, this would
+> be $n=i$. So for the remaining combination positions, you would
+> simply set the positions to be equal to $i$.
 
