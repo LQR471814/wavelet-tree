@@ -8,7 +8,7 @@ type integers interface {
 		int64 | uint64
 }
 
-// floor(log_2(n))
+// floor(log_2(n)) efficiently
 func floorLog2[T integers](n T) (out uint8) {
 	var zero T
 	for n > zero {
@@ -18,6 +18,8 @@ func floorLog2[T integers](n T) (out uint8) {
 	return
 }
 
+// this is realistically as efficient as we'll get for choose with small (sub
+// multi-million) n
 func choose(n, k uint64) (result uint64) {
 	if k > n {
 		return 0

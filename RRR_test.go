@@ -10,23 +10,23 @@ func TestNewRRR(t *testing.T) {
 	out := NewRRR(NewBitVector(10000), RRROptions{})
 	t.Log(
 		"block size:",
-		out.blockSize,
+		out.blockLogicalSize,
 	)
 	t.Log(
 		"superblock size:",
-		out.superblockSize,
+		out.superblockLogicalSize,
 	)
 	t.Log(
 		"size(class):",
-		out.classFieldSize,
+		out.classFieldActualSize,
 	)
 	t.Log(
 		"size(offset)",
-		out.offsetFieldSize,
+		out.offsetFieldActualSize,
 	)
 	t.Log(
 		"size(cumulative rank)",
-		out.cumulativeRankFieldSize,
+		out.cumulativeRankFieldActualSize,
 	)
 	t.Log(
 		"size(all):",
